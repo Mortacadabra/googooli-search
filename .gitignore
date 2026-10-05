@@ -8,6 +8,7 @@ data/
 # trial binaries and outputs
 /build
 /query
+/dump
 /idx*/
 ref*.txt
 dump*.txt

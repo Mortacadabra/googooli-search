@@ -1,16 +1,12 @@
-# Trial build: two programs sharing the header-only common.h.
 CXX      ?= g++
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
 
-all: build query
+all: build dump query
 
-build: build.cpp common.h
-	$(CXX) $(CXXFLAGS) -o $@ build.cpp
-
-query: query.cpp common.h
-	$(CXX) $(CXXFLAGS) -o $@ query.cpp
+%: %.cpp common.h
+	$(CXX) $(CXXFLAGS) -o $@ $<
 
 clean:
-	rm -f build query
+	rm -f build dump query
 
 .PHONY: all clean
