@@ -1,0 +1,13 @@
+data/
+
+# debug and program binaries
+*.dSYM
+
+# VS Code
+.vscode/
+# trial binaries and outputs
+/build
+/query
+/idx*/
+ref*.txt
+dump*.txt
