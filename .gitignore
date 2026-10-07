@@ -1,0 +1,8 @@
+data/
+runs/
+output/
+idx*/
+*.dSYM
+.vscode/
+.DS_Store
+indexer/build_runs
