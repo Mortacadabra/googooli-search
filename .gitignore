@@ -6,3 +6,4 @@ idx*/
 .vscode/
 .DS_Store
 indexer/build_runs
+indexer/merge_runs

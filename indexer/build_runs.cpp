@@ -1,15 +1,14 @@
 // Build:  make -C indexer
 // Run:    ./build_runs [project_root]      (default ".")
 //         reads <project_root>/data/collection.tsv, writes <project_root>/runs and /output
-//         output/pagetable.bin (final format, little-endian), written directly by this program:
+//         output/pagetable.bin (little-endian), written directly by this program:
 //             u32 N | u32 pid[N] | u16 docLen[N] | u64 docOffset[N]
-//         docOffset = byte offset of the document's line in the uncompressed collection.tsv
 
 #include "dataset_reader.h"
 #include "tokenizer.h"
+#include "util.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -30,7 +29,7 @@ static std::string OUTPUT_DIR;
 static const int64_t MAX_DOCS = -1;  // -1 = None (all documents)
 
 // Flush once roughly this many postings are in memory
-static const size_t MAX_POSTINGS_PER_RUN = 1000000;
+static const size_t MAX_POSTINGS_PER_RUN = 2000000;
 
 // Print progress every N documents
 static const int64_t PROGRESS_INTERVAL = 100000;
@@ -42,30 +41,7 @@ struct Posting {
     uint32_t tf;
 };
 
-// f"{n:,}"
-static std::string commas(unsigned long long n) {
-    std::string s = std::to_string(n), out;
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (i > 0 && (s.size() - i) % 3 == 0) out.push_back(',');
-        out.push_back(s[i]);
-    }
-    return out;
-}
-
-static double now_seconds() {  // time.perf_counter()
-    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
-static void append_uint(std::string& out, uint64_t v) {  // fast str(int)
-    char tmp[24];
-    int n = 0;
-    do { tmp[n++] = static_cast<char>('0' + v % 10); v /= 10; } while (v);
-    while (n) out.push_back(tmp[--n]);
-}
-
 static int write_run(std::vector<Posting>& postings, int run_number) {
-
-    // postings.sort(key=lambda x: (x[0], x[1]))
     std::sort(postings.begin(), postings.end(), [](const Posting& a, const Posting& b) {
         int c = a.term.compare(b.term);
         return c != 0 ? c < 0 : a.doc_id < b.doc_id;
@@ -112,10 +88,7 @@ static void remove_old_runs() {
 
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "pagetable.bin is written little-endian");
 
-// Streams the page table to disk in the final pagetable.bin layout, in constant memory.
-// The three columns are appended to temporary files while parsing (the position of each
-// column in the final file depends on N, which is only known at the end). finish() writes
-// the header and copies the columns after it, then deletes the temporary files.
+// Streams the page table to disk in the final pagetable.bin layout
 class PageTableWriter {
 public:
     explicit PageTableWriter(const std::string& dir) {
@@ -126,7 +99,7 @@ public:
         }
     }
 
-    // If the program aborts before finish(), do not leave the temporary files behind.
+    // close temporary files upon abort
     ~PageTableWriter() {
         if (finished_) return;
         for (int c = 0; c < 3; ++c) { std::fclose(tmp_[c]); unlink(tmp_path_[c].c_str()); }
@@ -147,7 +120,7 @@ public:
         uint32_t n = static_cast<uint32_t>(n_);
         std::fwrite(&n, sizeof n, 1, out);
         std::vector<char> chunk(1 << 20);
-        for (int c = 0; c < 3; ++c) {  // pid[], docLen[], docOffset[] in this order
+        for (int c = 0; c < 3; ++c) {  // pid[], docLen[], docOffset[] in order
             FILE* in = std::fopen(tmp_path_[c].c_str(), "rb");
             size_t got;
             while ((got = std::fread(chunk.data(), 1, chunk.size(), in)) > 0) std::fwrite(chunk.data(), 1, got, out);
@@ -176,7 +149,6 @@ private:
 };
 
 int main(int argc, char** argv) {
-
     if (argc > 1) PROJECT_ROOT = argv[1];
     DATASET_PATH = PROJECT_ROOT + "/data/collection.tsv";
     RUNS_DIR = PROJECT_ROOT + "/runs";
@@ -189,7 +161,6 @@ int main(int argc, char** argv) {
     remove_old_runs();
 
     std::vector<Posting> postings;
-
     int run_number = 0;
     int64_t num_docs = 0;
     uint64_t total_tokens = 0;
@@ -220,7 +191,7 @@ int main(int argc, char** argv) {
         total_tokens += document_length;
 
 
-        // PAGE TABLE: pid must be an unsigned 32-bit number, length must fit in 16 bits
+        // PAGE TABLE
         char* pid_end = nullptr;
         unsigned long long pid_value = std::strtoull(pid.c_str(), &pid_end, 10);
         if (pid.empty() || *pid_end != '\0' || pid_value > UINT32_MAX) {
@@ -233,32 +204,27 @@ int main(int argc, char** argv) {
         }
         page_table.add(static_cast<uint32_t>(pid_value), static_cast<uint16_t>(document_length), doc_offset);
 
-
         // TERM FREQUENCIES
         term_freqs.clear();
-        for (const std::string& t : tokens) ++term_freqs[t];  // Counter(tokens)
-
+        for (const std::string& t : tokens) {
+            ++term_freqs[t]; 
+        }
 
         // POSTINGS
-        for (const auto& [term, tf] : term_freqs)
+        for (const auto& [term, tf] : term_freqs) {
             postings.push_back({term, static_cast<uint32_t>(doc_id), tf});
-
+        }
 
         // FLUSH RUN
         if (postings.size() >= MAX_POSTINGS_PER_RUN) {
-
             total_postings += static_cast<uint64_t>(write_run(postings, run_number));
-
             postings.clear();
             run_number += 1;
         }
 
-
         // PROGRESS
         if (num_docs % PROGRESS_INTERVAL == 0) {
-
             double elapsed = now_seconds() - start_time;
-
             double docs_per_second = elapsed > 0 ? static_cast<double>(num_docs) / elapsed : 0;
 
             std::printf("Processed %s docs | %s docs/sec | elapsed %.2fs | buffer %s postings\n",
@@ -271,9 +237,7 @@ int main(int argc, char** argv) {
 
     // FINAL PARTIAL RUN
     if (!postings.empty()) {
-
         total_postings += static_cast<uint64_t>(write_run(postings, run_number));
-
         postings.clear();
         run_number += 1;
     }
@@ -283,27 +247,16 @@ int main(int argc, char** argv) {
 
     // FINAL STATISTICS
     double elapsed = now_seconds() - start_time;
-
     double avg_doc_length = num_docs > 0 ? static_cast<double>(total_tokens) / static_cast<double>(num_docs) : 0;
-
     double docs_per_second = elapsed > 0 ? static_cast<double>(num_docs) / elapsed : 0;
-
     if (FILE* stats_file = std::fopen(stats_path.c_str(), "wb")) {
-
         std::fprintf(stats_file, "num_docs=%lld\n", static_cast<long long>(num_docs));
-
         std::fprintf(stats_file, "total_tokens=%llu\n", static_cast<unsigned long long>(total_tokens));
-
         std::fprintf(stats_file, "avg_doc_length=%.4f\n", avg_doc_length);
-
         std::fprintf(stats_file, "total_postings=%llu\n", static_cast<unsigned long long>(total_postings));
-
         std::fprintf(stats_file, "num_runs=%d\n", run_number);
-
         std::fprintf(stats_file, "elapsed_seconds=%.4f\n", elapsed);
-
         std::fprintf(stats_file, "docs_per_second=%.4f\n", docs_per_second);
-
         std::fclose(stats_file);
     }
 

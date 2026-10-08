@@ -1,10 +1,14 @@
-# C++ port of the part-1 run builder.
 CXX      ?= clang++
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
 
-build_runs: build_runs.cpp dataset_reader.h tokenizer.h
+all: build_runs merge_runs
+
+build_runs: build_runs.cpp dataset_reader.h tokenizer.h util.h
 	$(CXX) $(CXXFLAGS) -o $@ build_runs.cpp
 
+merge_runs: merge_runs.cpp util.h ../varbyte.h
+	$(CXX) $(CXXFLAGS) -o $@ merge_runs.cpp
+
 clean:
-	rm -f build_runs
-.PHONY: clean
+	rm -f build_runs merge_runs
+.PHONY: all clean
