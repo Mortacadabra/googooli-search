@@ -1,11 +1,3 @@
-// indexer/dataset_reader.h -- C++ port of dataset_reader.py
-//
-// Python:  read_msmarco(path) yields (pid, passage) for every non-empty line
-//          ("pid<TAB>passage") of collection.tsv, with the trailing "\n" removed.
-//
-// Same here: MsMarcoReader::next(pid, passage) returns the next pair. The file is
-// streamed through a 1 MB buffer (never held in memory) and read as plain bytes,
-// so invalid UTF-8 needs no handling: bytes are passed through unchanged.
 #pragma once
 
 #include <cstdio>
@@ -25,7 +17,6 @@ public:
     MsMarcoReader& operator=(const MsMarcoReader&) = delete;
 
     // Byte offset in collection.tsv of the line returned by the last next() call
-    // (empty lines that were skipped are counted).
     unsigned long long line_offset() const { return line_offset_; }
 
     // Yields the next (pid, passage); returns false at the end of the file.
