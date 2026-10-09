@@ -1,5 +1,3 @@
-// indexer/merge_runs.cpp -- part 2: merge the sorted runs into the final inverted index
-//
 // Build:  make -C indexer
 // Run:    ./merge_runs [project_root]      (default ".")
 //         reads  <project_root>/runs/run_NNN.dat
