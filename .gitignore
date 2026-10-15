@@ -7,3 +7,4 @@ idx*/
 .DS_Store
 indexer/build_runs
 indexer/merge_runs
+query/query

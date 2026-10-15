@@ -1,7 +1,7 @@
 #pragma once
 
-// On-disk layout of the index files, shared by the indexer (writer) and the query processor
-// (reader). All files are little-endian.
+// This files defines the binary format of the index files, shared by the indexer and the query processor,
+// All files are little-endian.
 //
 //   index.bin      blocks of BLOCK_SIZE postings: [docIDs varbyte][freqs varbyte] (see merge_runs)
 //   meta.bin       u32 numBlocks | u32 lastDocID[] | u16 docBytes[] | u16 freqBytes[]
@@ -58,9 +58,7 @@ inline std::vector<T> read_column(size_t n, FILE* f, const std::string& path) {
     return v;
 }
 
-// ---------------------------------------------------------------------------------------------
 // meta.bin: one entry per block of index.bin
-
 struct Meta {
     std::vector<uint32_t> last_doc;    // last docID in the block
     std::vector<uint16_t> doc_bytes;   // size of the block's docID section
@@ -89,10 +87,7 @@ inline Meta read_meta(const std::string& path) {
     return m;
 }
 
-// ---------------------------------------------------------------------------------------------
-// lexicon.bin: one record per term, sorted by term.
-// A list starts at posting startSlot of block startBlock and holds ft postings.
-
+// lexicon.bin
 struct LexEntry {
     std::string_view term;
     uint32_t ft = 0, start_block = 0;
@@ -144,9 +139,7 @@ inline std::vector<LexEntry> read_lexicon(const std::string& path, std::vector<c
     return lexicon;
 }
 
-// ---------------------------------------------------------------------------------------------
 // pagetable.bin: one entry per docID
-
 struct PageTable {
     std::vector<uint32_t> pid;         // MS MARCO passage id
     std::vector<uint16_t> doc_len;     // length in tokens
