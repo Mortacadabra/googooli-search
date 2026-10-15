@@ -1,9 +1,9 @@
 // Build:  make -C indexer
 // Run:    ./build_runs [project_root]      (default ".")
 //         reads <project_root>/data/collection.tsv, writes <project_root>/runs and /output
-//         output/pagetable.bin (little-endian), written directly by this program:
-//             u32 N | u32 pid[N] | u16 docLen[N] | u64 docOffset[N]
+//         output/pagetable.bin layout defined in index_format.h
 
+#include "../index_format.h"
 #include "dataset_reader.h"
 #include "tokenizer.h"
 #include "util.h"
@@ -85,68 +85,6 @@ static void remove_old_runs() {
         closedir(d);
     }
 }
-
-static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "pagetable.bin is written little-endian");
-
-// Streams the page table to disk in the final pagetable.bin layout
-class PageTableWriter {
-public:
-    explicit PageTableWriter(const std::string& dir) {
-        for (int c = 0; c < 3; ++c) {
-            tmp_path_[c] = dir + "/pagetable." + kName[c] + ".tmp";
-            tmp_[c] = std::fopen(tmp_path_[c].c_str(), "wb");
-            if (!tmp_[c]) { std::perror(tmp_path_[c].c_str()); std::exit(1); }
-        }
-    }
-
-    // close temporary files upon abort
-    ~PageTableWriter() {
-        if (finished_) return;
-        for (int c = 0; c < 3; ++c) { std::fclose(tmp_[c]); unlink(tmp_path_[c].c_str()); }
-    }
-
-    void add(uint32_t pid, uint16_t doc_len, uint64_t doc_offset) {
-        put(0, &pid, sizeof pid);
-        put(1, &doc_len, sizeof doc_len);
-        put(2, &doc_offset, sizeof doc_offset);
-        ++n_;
-    }
-
-    void finish(const std::string& path) {
-        if (n_ > UINT32_MAX) { std::fprintf(stderr, "too many documents for a u32 N\n"); std::exit(1); }
-        for (int c = 0; c < 3; ++c) { flush(c); std::fclose(tmp_[c]); }
-        FILE* out = std::fopen(path.c_str(), "wb");
-        if (!out) { std::perror(path.c_str()); std::exit(1); }
-        uint32_t n = static_cast<uint32_t>(n_);
-        std::fwrite(&n, sizeof n, 1, out);
-        std::vector<char> chunk(1 << 20);
-        for (int c = 0; c < 3; ++c) {  // pid[], docLen[], docOffset[] in order
-            FILE* in = std::fopen(tmp_path_[c].c_str(), "rb");
-            size_t got;
-            while ((got = std::fread(chunk.data(), 1, chunk.size(), in)) > 0) std::fwrite(chunk.data(), 1, got, out);
-            std::fclose(in);
-            unlink(tmp_path_[c].c_str());
-        }
-        std::fclose(out);
-        finished_ = true;
-    }
-
-private:
-    void put(int c, const void* v, size_t size) {
-        buf_[c].append(static_cast<const char*>(v), size);
-        if (buf_[c].size() >= (1 << 20)) flush(c);
-    }
-    void flush(int c) {
-        std::fwrite(buf_[c].data(), 1, buf_[c].size(), tmp_[c]);
-        buf_[c].clear();
-    }
-
-    static constexpr const char* kName[3] = {"pid", "len", "off"};
-    std::string tmp_path_[3], buf_[3];
-    FILE* tmp_[3];
-    uint64_t n_ = 0;
-    bool finished_ = false;
-};
 
 int main(int argc, char** argv) {
     if (argc > 1) PROJECT_ROOT = argv[1];

@@ -7,8 +7,7 @@
 //                concatenated in lexicon order, and an inverted list may start/end mid-block. A docID 
 //                is stored absolute if it is the first posting of its block or of its list, else as the 
 //                gap to the previous posting.
-//   meta.bin     u32 numBlocks | u32 lastDocID[] | u16 docBytes[] | u16 freqBytes[]
-//   lexicon.bin  u32 numTerms | per term: u8 len, term, u32 ft, u32 startBlock, u8 startSlot
+//   meta.bin, lexicon.bin   layouts defined in index_format.h
 
 #include <algorithm>
 #include <cassert>
@@ -27,15 +26,13 @@
 #include <unistd.h>
 #include <vector>
 
+#include "../config.h"
+#include "../index_format.h"
 #include "../varbyte.h"
 #include "util.h"
 
-static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the index files are little-endian");
-
-static const uint32_t BLOCK_SIZE = 128;     // postings per block
 static const size_t FAN_IN = 200;          // runs merged at once (d)
 static const size_t MEMORY_MB = 512;        // total budget for input buffers
-static const size_t MAX_TERM_BYTES = 255;   // the lexicon stores the term length in one byte
 
 [[noreturn]] static void die(const std::string& msg) {
     std::fprintf(stderr, "merge_runs: %s\n", msg.c_str());
@@ -184,7 +181,7 @@ public:
         if (term.size() > MAX_TERM_BYTES)
             die("term of " + std::to_string(term.size()) + " bytes does not fit the one-byte length field");
         term_ = term;
-        start_block_ = static_cast<uint32_t>(last_doc_.size());  // blocks flushed so far
+        start_block_ = static_cast<uint32_t>(meta_.last_doc.size());  // blocks flushed so far
         start_slot_ = static_cast<uint8_t>(n_);                  // postings buffered in the open block
         first_of_list_ = true;
         ft_ = 0;
@@ -202,12 +199,7 @@ public:
     }
 
     void end_term() {
-        // lexicon record: u8 len, term, u32 ft, u32 startBlock, u8 startSlot
-        lex_.push_back(static_cast<char>(term_.size()));
-        lex_ += term_;
-        lex_.append(reinterpret_cast<const char*>(&ft_), sizeof ft_);
-        lex_.append(reinterpret_cast<const char*>(&start_block_), sizeof start_block_);
-        lex_.push_back(static_cast<char>(start_slot_));
+        write_lex_entry(lex_, {term_, ft_, start_block_, start_slot_});
         ++num_terms_;
         if (lex_.size() >= (1 << 20)) flush_lexicon();
     }
@@ -221,28 +213,21 @@ public:
         write_or_die(&num_terms_, sizeof num_terms_, lexicon_, "lexicon.bin");
         std::fclose(lexicon_);
 
-        FILE* meta = std::fopen((dir_ + "/meta.bin").c_str(), "wb");
-        if (!meta) die("cannot create meta.bin");
-        uint32_t blocks = static_cast<uint32_t>(last_doc_.size());
-        write_or_die(&blocks, sizeof blocks, meta, "meta.bin");
-        write_or_die(last_doc_.data(), last_doc_.size() * sizeof(uint32_t), meta, "meta.bin");
-        write_or_die(doc_bytes_.data(), doc_bytes_.size() * sizeof(uint16_t), meta, "meta.bin");
-        write_or_die(freq_bytes_.data(), freq_bytes_.size() * sizeof(uint16_t), meta, "meta.bin");
-        std::fclose(meta);
+        write_meta(dir_ + "/meta.bin", meta_);
     }
 
     uint64_t total_postings() const { return total_postings_; }
     uint32_t num_terms() const { return num_terms_; }
-    size_t num_blocks() const { return last_doc_.size(); }
+    size_t num_blocks() const { return meta_.last_doc.size(); }
     uint64_t last_term_postings() const { return ft_; }
 
 private:
     void flush_block() {
         write_or_die(docs_.data(), docs_.size(), index_, "index.bin");
         write_or_die(freqs_.data(), freqs_.size(), index_, "index.bin");
-        last_doc_.push_back(prev_);
-        doc_bytes_.push_back(static_cast<uint16_t>(docs_.size()));
-        freq_bytes_.push_back(static_cast<uint16_t>(freqs_.size()));
+        meta_.last_doc.push_back(prev_);
+        meta_.doc_bytes.push_back(static_cast<uint16_t>(docs_.size()));
+        meta_.freq_bytes.push_back(static_cast<uint16_t>(freqs_.size()));
         docs_.clear();
         freqs_.clear();
         n_ = 0;
@@ -265,8 +250,7 @@ private:
     bool first_of_list_ = false;
     uint32_t num_terms_ = 0;
     uint64_t total_postings_ = 0, reported_ = 0;
-    std::vector<uint32_t> last_doc_;  // meta.bin columns
-    std::vector<uint16_t> doc_bytes_, freq_bytes_;
+    Meta meta_;  // meta.bin columns
 };
 
 // D-way merge of the sub indices
