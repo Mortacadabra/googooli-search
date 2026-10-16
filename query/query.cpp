@@ -14,6 +14,7 @@
 #include "../indexer/tokenizer.h"
 #include "../indexer/util.h"
 #include "list_cursor.h"
+#include "snippets.h"
 
 static const size_t TOP_K = 10;
 
@@ -148,16 +149,18 @@ static std::vector<Result> disjunctive(Lists& lists) {
     return top.sorted();
 }
 
-static void run_query(const Index& ix, const std::string& text, bool conj) {
+static void run_query(const Index& ix, const Snippets& sn, const std::string& text, bool conj) {
     double start = now_seconds();
     std::vector<std::string> terms = tokenize(text);
     std::sort(terms.begin(), terms.end());
     terms.erase(std::unique(terms.begin(), terms.end()), terms.end());
 
     Lists lists;
+    std::vector<std::pair<std::string, double>> weighted;  // (term, idf) for the snippets
     bool missing = false;
     for (const std::string& t : terms) {
         if (auto lp = openList(ix, t)) {
+            weighted.push_back({t, lp->idf});
             lists.push_back(std::move(lp));
         } else {
             missing = true;
@@ -176,7 +179,9 @@ static void run_query(const Index& ix, const std::string& text, bool conj) {
 
     std::printf("%zu results in %.2f ms\n", results.size(), (now_seconds() - start) * 1000);
     for (size_t r = 0; r < results.size(); ++r) {
-        std::printf("%2zu. pid %-8u score %.4f\n", r + 1, ix.pid[results[r].second], results[r].first);
+        uint32_t doc = results[r].second;
+        std::printf("%2zu. pid %-8u score %.4f\n", r + 1, ix.pid[doc], results[r].first);
+        std::printf("    %s\n", make_snippet(sn.passage(doc), weighted).c_str());
     }
 }
 
@@ -187,6 +192,8 @@ int main(int argc, char** argv) {
         root = argv[1];
     }
     ix.load(root + "/output");
+    Snippets sn;
+    sn.open_files(root);
     std::printf("Loaded %zu terms, %zu documents.\n", ix.lexicon.size(), ix.pid.size());
 
     bool conj = false;
@@ -211,7 +218,7 @@ int main(int argc, char** argv) {
             conj = false;
             line.erase(0, 3);
         }
-        run_query(ix, line, conj);
+        run_query(ix, sn, line, conj);
     }
     return 0;
 }
