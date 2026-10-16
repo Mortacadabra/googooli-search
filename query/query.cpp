@@ -49,6 +49,14 @@ struct TopK {
         }
     }
 
+    // a doc has to score above this to get in to top k results
+    double maxscore_threshold() const {
+        if (heap.size() < TOP_K) {
+            return 0;
+        }
+        return heap.top().first;
+    }
+
     // best result first
     std::vector<Result> sorted() {
         std::vector<Result> out;
@@ -90,22 +98,49 @@ static std::vector<Result> conjunctive(Lists& lists) {
     return top.sorted();
 }
 
-// disjunctive query
 static std::vector<Result> disjunctive(Lists& lists) {
     TopK top;
+    std::sort(lists.begin(), lists.end(), [](auto& a, auto& b) { return a->max_score < b->max_score; });
+    size_t n = lists.size();
+    std::vector<double> prefix(n);  // prefix[i] = sum of max_score of lists 0..i
+    for (size_t i = 0; i < n; ++i) {
+        prefix[i] = lists[i]->max_score;
+        if (i > 0) {
+            prefix[i] += prefix[i - 1];
+        }
+    }
+
+    size_t e = 0;
     while (true) {
+        double threshold = top.maxscore_threshold();
+        while (e < n && prefix[e] <= threshold) {
+            ++e;
+        }
+        if (e == n) {  // no doc can surpass the threshold
+            break;
+        }
+
         uint32_t did = END;
-        for (auto& lp : lists) {
-            did = std::min(did, lp->cur);
+        for (size_t i = e; i < n; ++i) {
+            did = std::min(did, lists[i]->cur);
         }
         if (did == END) {
             break;
         }
+
         double s = 0;
-        for (auto& lp : lists) {
-            if (lp->cur == did) {
-                s += getScore(*lp);
-                nextGEQ(*lp, did + 1);
+        for (size_t i = e; i < n; ++i) {
+            if (lists[i]->cur == did) {
+                s += getScore(*lists[i]);
+                nextGEQ(*lists[i], did + 1);
+            }
+        }
+        for (size_t i = e; i-- > 0;) {  // non-essential lists
+            if (s + prefix[i] <= threshold) { 
+                break;
+            }
+            if (nextGEQ(*lists[i], did) == did) {
+                s += getScore(*lists[i]);
             }
         }
         top.push(did, s);

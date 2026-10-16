@@ -24,6 +24,7 @@ struct ListCursor {
     uint64_t base;             // file offset of buf[0]
     uint32_t ft, start_block, start_slot, end_block, end_slot;
     double idf;
+    double max_score;               // upper bound on this term's score in any doc
 
     uint32_t block, decoded = END;  // current block / block held in docs[]
     bool freqs_ready = false;
@@ -89,6 +90,7 @@ inline std::unique_ptr<ListCursor> openList(const Index& ix, std::string_view te
 
     double n = ix.pid.size();
     lp->idf = std::log((n - e->ft + 0.5) / (e->ft + 0.5) + 1.0);
+    lp->max_score = lp->idf * (K1 + 1);
 
     lp->block = lp->start_block;
     decode_docs(*lp);
