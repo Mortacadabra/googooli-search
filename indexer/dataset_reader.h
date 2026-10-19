@@ -10,7 +10,7 @@ public:
     explicit MsMarcoReader(const std::string& path) {
         file_ = std::fopen(path.c_str(), "rb");
         if (!file_) fail("Could not open " + path);
-        buf_.resize(1 << 20);
+        buf_.resize(1 << 20); // 1 MiB read buffer
     }
     ~MsMarcoReader() { if (file_) std::fclose(file_); }
     MsMarcoReader(const MsMarcoReader&) = delete;
